@@ -79,12 +79,11 @@ static string create_custom_cursor(FlutterCustomCursorPlugin *self, FlValue *arg
   // Ignore [width] and [height].
   // int width = fl_value_get_int(fl_value_lookup_string(args, "width"));
   // int height = fl_value_get_int(fl_value_lookup_string(args, "height"));
-  GdkPixbuf* pixbuf = nullptr;
   auto buffer = fl_value_lookup_string(args, "buffer");
   const uint8_t *cursor_buff = fl_value_get_uint8_list(buffer);
   auto length = fl_value_get_length(buffer);
   if (cursor_buff == nullptr) {
-    return nullptr;
+    return {};
   }
   //  int device = fl_value_get_int(fl_value_lookup_string(args, "device"));
   g_autoptr(GdkPixbufLoader) loader = gdk_pixbuf_loader_new();
@@ -94,12 +93,18 @@ static string create_custom_cursor(FlutterCustomCursorPlugin *self, FlValue *arg
   //   gdk_pixbuf_loader_set_size(loader, width, height);
   // }
   gdk_pixbuf_loader_close(loader, nullptr);
-  pixbuf = gdk_pixbuf_copy(gdk_pixbuf_loader_get_pixbuf(loader));
+  // The decode fails on an undecodable buffer, and on gdk-pixbuf 2.43+ whenever
+  // no glycin loader is reachable. get_pixbuf() then returns NULL; passing that
+  // to gdk_pixbuf_copy() and returning NULL as a std::string aborts the process.
+  GdkPixbuf *decoded = gdk_pixbuf_loader_get_pixbuf(loader);
+  if (decoded == nullptr) {
+    return {};
+  }
+  g_autoptr(GdkPixbuf) pixbuf = gdk_pixbuf_copy(decoded);
   GdkDisplay *display = gdk_display_get_default();
-  GdkCursor* cursor = nullptr;
-  cursor = gdk_cursor_new_from_pixbuf(display, pixbuf, hot_x, hot_y);
+  GdkCursor *cursor = gdk_cursor_new_from_pixbuf(display, pixbuf, hot_x, hot_y);
   if (cursor == nullptr) {
-    return nullptr;
+    return {};
   }
   self->cache->insert(std::make_pair(name, cursor));
   return name;
