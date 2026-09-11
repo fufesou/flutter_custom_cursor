@@ -21,6 +21,30 @@ Update: the latest Flutter `3.7.0` does not contain PR above, which merges to `f
 
 # Get prepared
 
+## Register a Flutter image with an explicit scale
+
+```dart
+await CursorManager.instance.registerCursorImage(
+  name: cursorName,
+  image: image, // dart:ui Image; the caller retains ownership.
+  hotSpot: const Offset(3, 5), // Coordinates in the source image's pixels.
+  scale: 0.75, // Logical pixels per source pixel.
+  devicePixelRatio: View.of(context).devicePixelRatio,
+);
+```
+
+The plugin scales the full artwork and hotspot together. macOS uses logical
+points independently of PNG density metadata. Windows uses physical pixels and
+the Flutter engine's cursor channel. GTK requires integer logical dimensions
+and hotspots; its raster density is rounded up to an integer. Tall Linux images
+are padded on the right with transparency to avoid hardware cursor clipping.
+
+Use a new name whenever the image, scale or DPR changes, and await deletion
+before reusing a name. `FlutterCustomMemoryImageCursor` waits for image creation
+and does not activate a session that has already been disposed. Applications
+choose their own minimum cursor size; a size that rounds to zero is an error.
+The existing buffer API below keeps its original units and formats.
+
 ## Register your custom cursor before
 
 ```dart

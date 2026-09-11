@@ -11,6 +11,8 @@
 #include <iostream>
 #include <cstring>
 #include <memory>
+#include <algorithm>
+#include <cmath>
 
 using namespace std;
 
@@ -71,6 +73,45 @@ GdkWindow *get_gdk_window(FlutterCustomCursorPlugin *self)
 //     'y' : cursor.y,
 //     'length':  cursor.buffer.length
 //   },
+static GdkCursor* create_image_cursor(GdkDisplay* display, GdkPixbuf* pixbuf,
+                                      FlValue* args) {
+  FlValue* value = fl_value_lookup_string(args, "imagePixelRatio");
+  if (fl_value_get_type(value) != FL_VALUE_TYPE_FLOAT) {
+    g_warning("Cursor imagePixelRatio must be a double");
+    return nullptr;
+  }
+  const double ratio = fl_value_get_float(value);
+  const int width = gdk_pixbuf_get_width(pixbuf);
+  const int height = gdk_pixbuf_get_height(pixbuf);
+  const double hot_x = fl_value_get_float(fl_value_lookup_string(args, "hotX"));
+  const double hot_y = fl_value_get_float(fl_value_lookup_string(args, "hotY"));
+  if (!std::isfinite(ratio) || ratio < 1 || ratio != std::floor(ratio) ||
+      ratio > std::min(width, height) || !std::isfinite(hot_x) ||
+      !std::isfinite(hot_y) || hot_x < 0 || hot_y < 0 ||
+      hot_x >= width || hot_y >= height) {
+    g_warning("Invalid cursor imagePixelRatio or hotspot");
+    return nullptr;
+  }
+  const int scale = static_cast<int>(ratio);
+  // Wayland buffer dimensions must be divisible by their integer buffer scale.
+  if (width % scale != 0 || height % scale != 0) {
+    g_warning("Cursor dimensions must be multiples of imagePixelRatio");
+    return nullptr;
+  }
+  // The PNG already contains high-DPI pixels. Tag its density so GDK does not
+  // treat each physical pixel as a logical pixel and scale the image again.
+  cairo_surface_t* surface = gdk_cairo_surface_create_from_pixbuf(pixbuf, scale, nullptr);
+  GdkCursor* cursor = nullptr;
+  if (cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS) {
+    // GDK takes logical hotspots, while the incoming coordinates are in pixels.
+    cursor = gdk_cursor_new_from_surface(display, surface,
+        std::min(std::round(hot_x / ratio), width / ratio - 1),
+        std::min(std::round(hot_y / ratio), height / ratio - 1));
+  }
+  cairo_surface_destroy(surface);
+  return cursor;
+}
+
 static string create_custom_cursor(FlutterCustomCursorPlugin *self, FlValue *args)
 {
   auto name = string(fl_value_get_string(fl_value_lookup_string(args, "name")));
@@ -102,7 +143,9 @@ static string create_custom_cursor(FlutterCustomCursorPlugin *self, FlValue *arg
   }
   g_autoptr(GdkPixbuf) pixbuf = gdk_pixbuf_copy(decoded);
   GdkDisplay *display = gdk_display_get_default();
-  GdkCursor *cursor = gdk_cursor_new_from_pixbuf(display, pixbuf, hot_x, hot_y);
+  GdkCursor *cursor = fl_value_lookup_string(args, "imagePixelRatio") != nullptr
+      ? create_image_cursor(display, pixbuf, args)
+      : gdk_cursor_new_from_pixbuf(display, pixbuf, hot_x, hot_y);
   if (cursor == nullptr) {
     return {};
   }
@@ -152,7 +195,10 @@ static void flutter_custom_cursor_plugin_handle_method_call(
   {
     auto args = fl_method_call_get_args(method_call);
     auto ret = create_custom_cursor(self, args);
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(ret.c_str())));
+    response = ret.empty()
+        ? FL_METHOD_RESPONSE(fl_method_error_response_new("cursor_creation_failed",
+            "Could not create cursor; check PNG, hotspot and imagePixelRatio", nullptr))
+        : FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(ret.c_str())));
   }
   else if (strcmp(method, "setCustomCursor") == 0)
   {

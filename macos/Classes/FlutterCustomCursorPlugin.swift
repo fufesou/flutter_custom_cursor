@@ -16,7 +16,7 @@ public class FlutterCustomCursorPlugin: NSObject, FlutterPlugin {
         let arguments = call.arguments as! Dictionary<String, Any>
         let ret = createCustomCursor(arguments)
         if (ret == nil) {
-            result(FlutterError(code: "-1", message: "Create the cursor failed", details: "Please make sure a png buffer is provided."))
+            result(FlutterError(code: "-1", message: "Create the cursor failed", details: "Check the PNG buffer, hotspot and imagePixelRatio."))
         } else {
             result(ret!)
         }
@@ -48,11 +48,33 @@ public class FlutterCustomCursorPlugin: NSObject, FlutterPlugin {
     // no need to provide width and height on macOS API
     let _ = arguments["width"] as! Int
     let _ = arguments["height"] as! Int
-    let image = memoryImage(data: Data(buffer))
+    let image: NSImage?
+    var x = hotX
+    var y = hotY
+    if let ratioValue = arguments["imagePixelRatio"] {
+        guard let ratio = ratioValue as? Double, ratio.isFinite, ratio > 0,
+              let bitmap = NSBitmapImageRep(data: Data(buffer)),
+              hotX.isFinite, hotY.isFinite, hotX >= 0, hotY >= 0,
+              hotX < Double(bitmap.pixelsWide), hotY < Double(bitmap.pixelsHigh) else {
+            return nil
+        }
+        // PNG density metadata must not override the caller's logical size.
+        let size = NSSize(width: Double(bitmap.pixelsWide) / ratio,
+                          height: Double(bitmap.pixelsHigh) / ratio)
+        bitmap.size = size
+        let scaledImage = NSImage(size: size)
+        scaledImage.addRepresentation(bitmap)
+        image = scaledImage
+        // NSCursor measures both the image size and hotspot in points.
+        x /= ratio
+        y /= ratio
+    } else {
+        image = memoryImage(data: Data(buffer))
+    }
     if (image == nil) {
         return nil;
     }
-    let cursor = getCursor(image: image!, x: hotX, y: hotY)
+    let cursor = getCursor(image: image!, x: x, y: y)
     caches[name] = cursor;
     return name
   }

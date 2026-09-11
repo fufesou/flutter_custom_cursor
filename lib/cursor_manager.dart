@@ -1,6 +1,9 @@
-import 'dart:io';
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+import 'src/cursor_image.dart';
 
 class CursorData {
   late String name;
@@ -31,6 +34,51 @@ class CursorManager {
 
   CursorManager._();
   static CursorManager instance = CursorManager._();
+  // Encoding runs before the platform call. Channel FIFO alone cannot order
+  // activation or deletion against an image whose encoding is still pending.
+  final _pendingImages = <String, Future<String>>{};
+
+  /// Registers [image] at [scale] logical pixels per source pixel.
+  /// [hotSpot] is in source pixels; [devicePixelRatio] is the controller view's
+  /// current DPR. Artwork and hotspot are scaled together. GTK quantizes the
+  /// result to logical pixels; Windows quantizes to physical pixels.
+  /// Use a different [name] whenever the image, scale or DPR changes.
+  Future<String> registerCursorImage({
+    required String name,
+    required ui.Image image,
+    required ui.Offset hotSpot,
+    double scale = 1,
+    double devicePixelRatio = 1,
+  }) {
+    final pending = _pendingImages[name];
+    if (pending != null) return pending;
+    final registration = encodeCursorImage(
+            name: name,
+            image: image,
+            hotSpot: hotSpot,
+            scale: scale,
+            devicePixelRatio: devicePixelRatio,
+            platform: defaultTargetPlatform)
+        .then((arguments) async {
+      final cursorName = await _getMethodChannel()
+          .invokeMethod<String>(_getMethod(createCursorKey), arguments);
+      if (cursorName != name) {
+        throw PlatformException(
+            code: 'cursor_creation_failed',
+            message: 'The native backend did not register cursor $name.');
+      }
+      return name;
+    }).whenComplete(() {
+      _pendingImages.remove(name);
+    });
+    _pendingImages[name] = registration;
+    return registration;
+  }
+
+  /// Waits for image encoding and native creation, if still in progress.
+  Future<void> ensureCursorRegistered(String name) async {
+    await _pendingImages[name];
+  }
 
   /// [Note]
   /// The documentation from `engine/shell/platform/cursor_handler.cc`.
@@ -83,6 +131,7 @@ class CursorManager {
   }
 
   Future<void> deleteCursor(String name) async {
+    await ensureCursorRegistered(name);
     await _getMethodChannel()
         .invokeMethod(_getMethod(deleteCursorMethod), {"name": name});
   }
@@ -93,7 +142,7 @@ class CursorManager {
   }
 
   MethodChannel _getMethodChannel() {
-    if (Platform.isWindows) {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
       return SystemChannels.mouseCursor;
     } else {
       return const MethodChannel('flutter_custom_cursor');
@@ -101,7 +150,7 @@ class CursorManager {
   }
 
   String _getMethod(String method) {
-    if (Platform.isWindows) {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
       return "$method/windows";
     } else {
       return method;
