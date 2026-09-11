@@ -1,6 +1,6 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'src/cursor_image.dart';
@@ -58,7 +58,13 @@ class CursorManager {
             hotSpot: hotSpot,
             scale: scale,
             devicePixelRatio: devicePixelRatio,
-            platform: defaultTargetPlatform)
+            platform: switch (Platform.operatingSystem) {
+              'macos' => TargetPlatform.macOS,
+              'linux' => TargetPlatform.linux,
+              'windows' => TargetPlatform.windows,
+              _ =>
+                throw UnsupportedError('Image cursors require a desktop OS.'),
+            })
         .then((arguments) async {
       final cursorName = await _getMethodChannel()
           .invokeMethod<String>(_getMethod(createCursorKey), arguments);
@@ -142,7 +148,7 @@ class CursorManager {
   }
 
   MethodChannel _getMethodChannel() {
-    if (defaultTargetPlatform == TargetPlatform.windows) {
+    if (Platform.isWindows) {
       return SystemChannels.mouseCursor;
     } else {
       return const MethodChannel('flutter_custom_cursor');
@@ -150,7 +156,7 @@ class CursorManager {
   }
 
   String _getMethod(String method) {
-    if (defaultTargetPlatform == TargetPlatform.windows) {
+    if (Platform.isWindows) {
       return "$method/windows";
     } else {
       return method;

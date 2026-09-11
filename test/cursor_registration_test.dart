@@ -2,9 +2,9 @@
 // ignore_for_file: invalid_use_of_protected_member
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_custom_cursor/cursor_manager.dart';
@@ -29,7 +29,9 @@ void main() {
 }
 
 class _RegistrationTest {
-  static const channel = MethodChannel('flutter_custom_cursor');
+  static final channel = Platform.isWindows
+      ? SystemChannels.mouseCursor
+      : const MethodChannel('flutter_custom_cursor');
   final manager = CursorManager.instance;
   final calls = <String>[];
   final createCalled = Completer<void>();
@@ -37,7 +39,6 @@ class _RegistrationTest {
   late ui.Image image;
 
   Future<void> setUp() async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     final recorder = ui.PictureRecorder();
     ui.Canvas(recorder).drawColor(const ui.Color(0xff123456), ui.BlendMode.src);
     final picture = recorder.endRecording();
@@ -45,8 +46,8 @@ class _RegistrationTest {
     picture.dispose();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (call.method == 'createCustomCursor') {
+      calls.add(call.method.split('/').first);
+      if (calls.last == 'createCustomCursor') {
         createCalled.complete();
         return nativeCreation.future;
       }
@@ -56,7 +57,6 @@ class _RegistrationTest {
 
   void tearDown() {
     image.dispose();
-    debugDefaultTargetPlatformOverride = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   }

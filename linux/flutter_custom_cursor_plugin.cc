@@ -195,10 +195,7 @@ static void flutter_custom_cursor_plugin_handle_method_call(
   {
     auto args = fl_method_call_get_args(method_call);
     auto ret = create_custom_cursor(self, args);
-    response = ret.empty()
-        ? FL_METHOD_RESPONSE(fl_method_error_response_new("cursor_creation_failed",
-            "Could not create cursor; check PNG, hotspot and imagePixelRatio", nullptr))
-        : FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(ret.c_str())));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(ret.c_str())));
   }
   else if (strcmp(method, "setCustomCursor") == 0)
   {
