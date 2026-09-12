@@ -21,14 +21,14 @@ Future<Map<String, dynamic>> encodeCursorImage({
       devicePixelRatio: devicePixelRatio);
   final linux = platform == TargetPlatform.linux;
   final ratio = linux ? devicePixelRatio.ceilToDouble() : devicePixelRatio;
+  // A thin axis must survive rounding, including GTK's logical-pixel rounding
+  // before applying the buffer scale. Hotspots below use these actual dimensions.
+  const minRasterSize = 1;
   int pixels(int value) => linux
-      ? (value * scale).round() * ratio.toInt()
-      : (value * scale * ratio).round();
+      ? math.max(minRasterSize, (value * scale).round()) * ratio.toInt()
+      : math.max(minRasterSize, (value * scale * ratio).round());
   final width = pixels(image.width);
   final height = pixels(image.height);
-  if (width <= 0 || height <= 0) {
-    throw ArgumentError('The scaled cursor must occupy at least one pixel.');
-  }
   final ownedImage = image.clone();
   final bufferWidth = linux ? math.max(width, height) : width;
   try {

@@ -27,12 +27,48 @@ void main() {
     for (final dpr in [1.0, 1.25, 2.0]) {
       test('$platform DPR $dpr preserves the full image and hotspot',
           () => _checkImageCase(platform, dpr));
+      test('$platform DPR $dpr keeps thin cursor axes and hotspots valid',
+          () => _checkThinCursor(platform, dpr));
     }
   }
-  test('rejects invalid geometry instead of silently changing the size',
-      _rejectInvalidGeometry);
+  test('rejects invalid scales and source hotspots', _rejectInvalidGeometry);
   test('owns an image handle while asynchronous encoding is in progress',
       _retainImage);
+}
+
+Future<void> _checkThinCursor(TargetPlatform platform, double dpr) async {
+  const longEdge = 64;
+  const minimumSize = 12;
+  for (final (width, height) in [(2, longEdge), (longEdge, 2)]) {
+    final image = await createTestImage(width: width, height: height);
+    addTearDown(image.dispose);
+    final args = await encodeCursorImage(
+      name: 'thin',
+      image: image,
+      hotSpot: ui.Offset((width - 1).toDouble(), (height - 1).toDouble()),
+      scale: minimumSize / longEdge,
+      devicePixelRatio: dpr,
+      platform: platform,
+    );
+    final linux = platform == TargetPlatform.linux;
+    final ratio = linux ? dpr.ceilToDouble() : dpr;
+    final shortSide = linux ? ratio.toInt() : 1;
+    final longSide = (minimumSize * ratio).round();
+    final rasterWidth = width == longEdge ? longSide : shortSide;
+    final rasterHeight = height == longEdge ? longSide : shortSide;
+    expect(args['width'], linux ? longSide : rasterWidth);
+    expect(args['height'], rasterHeight);
+    for (final (key, pixels, source) in [
+      ('hotX', rasterWidth, width),
+      ('hotY', rasterHeight, height)
+    ]) {
+      final value = args[key] as double;
+      expect(value, inInclusiveRange(0, pixels - (linux ? ratio : 0.0)));
+      if (source == 2) {
+        expect(value, platform == TargetPlatform.macOS ? 0.5 : 0.0);
+      }
+    }
+  }
 }
 
 Future<void> _checkImageCase(TargetPlatform platform, double dpr) async {
@@ -99,7 +135,7 @@ Future<void> _checkPixels(
 Future<void> _rejectInvalidGeometry() async {
   final image = await cursorImage();
   addTearDown(image.dispose);
-  for (final scale in [0.0, -1.0, double.nan, double.infinity, 0.001]) {
+  for (final scale in [0.0, -1.0, double.nan, double.infinity]) {
     await expectLater(
         encodeCursorImage(
             name: 'bad',
