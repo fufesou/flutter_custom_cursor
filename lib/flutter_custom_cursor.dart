@@ -31,7 +31,20 @@ class _FlutterCustomMemoryImageCursorSession extends MouseCursorSession {
 
   @override
   Future<void> activate() async {
-    await CursorManager.instance.ensureCursorRegistered(cursor.key.toString());
+    try {
+      await CursorManager.instance
+          .ensureCursorRegistered(cursor.key.toString());
+    } catch (error, stackTrace) {
+      // Flutter does not await activation, so report this error explicitly.
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'flutter_custom_cursor',
+        context: ErrorDescription(
+            'while registering cursor "${cursor.key}" for activation'),
+      ));
+      return;
+    }
     // The pointer may have left this region while registration was pending.
     if (_disposed) return;
     await CursorManager.instance.setSystemCursor(cursor.key.toString());

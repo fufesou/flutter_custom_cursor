@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_custom_cursor/cursor_manager.dart';
@@ -26,6 +27,12 @@ void main() {
       () => testCase.deletionWaits());
   test('native creation failure is an explicit error',
       () => testCase.creationFailure());
+  test('unawaited activation reports native creation failure',
+      () => testCase.activationFailure());
+  test('disposed activation reports native creation failure',
+      () => testCase.activationFailure(dispose: true));
+  test('unawaited activation reports invalid image geometry',
+      () => testCase.activationFailure(invalidGeometry: true));
 }
 
 class _RegistrationTest {
@@ -115,5 +122,45 @@ class _RegistrationTest {
     await createCalled.future;
     nativeCreation.complete('');
     await assertion;
+  }
+
+  Future<void> activationFailure(
+      {bool dispose = false, bool invalidGeometry = false}) async {
+    const name = 'activation-error';
+    const device = 1;
+    final reports = <FlutterErrorDetails>[];
+    final previousHandler = FlutterError.onError;
+    FlutterError.onError = reports.add;
+    addTearDown(() => FlutterError.onError = previousHandler);
+    final registered = manager.registerCursorImage(
+        name: name,
+        image: image,
+        hotSpot: invalidGeometry
+            ? ui.Offset(image.width.toDouble(), 0)
+            : ui.Offset.zero);
+    final session =
+        const FlutterCustomMemoryImageCursor(key: name).createSession(device);
+    addTearDown(session.dispose);
+    unawaited(session.activate());
+    if (dispose) session.dispose();
+    if (!invalidGeometry) {
+      await createCalled.future;
+      nativeCreation.complete('');
+    }
+    // Drain activation's asynchronous continuation without awaiting its future.
+    await Future<void>.delayed(Duration.zero);
+    final report = reports.single;
+    expect(report.exception,
+        invalidGeometry ? isA<ArgumentError>() : isA<PlatformException>());
+    expect(report.stack.toString(), isNotEmpty);
+    expect(report.library, 'flutter_custom_cursor');
+    expect(report.context?.toDescription(), contains(name));
+    expect(report.silent, isFalse);
+    await registered.then<void>((_) => fail('Registration must fail.'),
+        onError: (Object error, StackTrace stack) {
+      expect(error, same(report.exception));
+      expect(stack, same(report.stack));
+    });
+    expect(calls, invalidGeometry ? isEmpty : ['createCustomCursor']);
   }
 }
