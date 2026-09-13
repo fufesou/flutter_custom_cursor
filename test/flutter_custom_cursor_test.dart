@@ -4,9 +4,32 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_custom_cursor/cursor_manager.dart';
+import 'package:flutter_custom_cursor/flutter_custom_cursor.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  test('unchanged keys retain the active mouse cursor session', () async {
+    final channel = Platform.isWindows
+        ? SystemChannels.mouseCursor
+        : const MethodChannel('flutter_custom_cursor');
+    final activated = <String>[];
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      expect(call.method.split('/').first, 'setCustomCursor');
+      activated.add(call.arguments['name'] as String);
+      return null;
+    });
+    addTearDown(() => binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    final mouse = MouseCursorManager(SystemMouseCursors.basic);
+    for (final key in ['first', 'first', 'first', 'second', 'second', 'first']) {
+      // Rebuilds create distinct objects for the same already-registered bitmap.
+      mouse.handleDeviceCursorUpdate(
+          1, null, [FlutterCustomMemoryImageCursor(key: key)]);
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(activated, ['first', 'second', 'first']);
+  });
   test('legacy buffer calls keep the native OS channel and units', () async {
     debugDefaultTargetPlatformOverride =
         Platform.isWindows ? TargetPlatform.macOS : TargetPlatform.windows;
