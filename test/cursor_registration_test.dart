@@ -50,8 +50,11 @@ class _RegistrationTest {
   final createCalled = Completer<void>();
   var nativeCreation = Completer<String>();
   late ui.Image image;
+  late int routeCount;
 
   Future<void> setUp() async {
+    routeCount =
+        TestWidgetsFlutterBinding.instance.pointerRouter.debugGlobalRouteCount;
     final recorder = ui.PictureRecorder();
     ui.Canvas(recorder).drawColor(const ui.Color(0xff123456), ui.BlendMode.src);
     final picture = recorder.endRecording();
@@ -69,6 +72,8 @@ class _RegistrationTest {
   }
 
   void tearDown() {
+    expect(TestWidgetsFlutterBinding.instance.pointerRouter.debugGlobalRouteCount,
+        routeCount);
     image.dispose();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);

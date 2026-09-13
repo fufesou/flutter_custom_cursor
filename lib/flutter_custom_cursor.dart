@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_custom_cursor/cursor_manager.dart';
 
@@ -46,6 +47,14 @@ class _FlutterCustomMemoryImageCursorSession extends MouseCursorSession {
 
   @override
   Future<void> activate() async {
+    final router = GestureBinding.instance.pointerRouter;
+    // Flutter drops removed-pointer sessions without calling dispose(). Track
+    // removal only while registration is pending, including exit and re-entry.
+    void onPointerEvent(PointerEvent event) {
+      if (event is PointerRemovedEvent && event.device == device) dispose();
+    }
+
+    router.addGlobalRoute(onPointerEvent);
     try {
       await CursorManager.instance
           .ensureCursorRegistered(cursor.key.toString());
@@ -59,6 +68,8 @@ class _FlutterCustomMemoryImageCursorSession extends MouseCursorSession {
             'while registering cursor "${cursor.key}" for activation'),
       ));
       return;
+    } finally {
+      router.removeGlobalRoute(onPointerEvent);
     }
     // The pointer may have left this region while registration was pending.
     if (_disposed) return;
