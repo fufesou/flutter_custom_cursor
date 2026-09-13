@@ -37,6 +37,7 @@ class CursorManager {
   // Encoding runs before the platform call. Channel FIFO alone cannot order
   // activation or deletion against an image whose encoding is still pending.
   final _pendingImages = <String, Future<String>>{};
+  final _pendingDeletions = <String, Future<void>>{};
   final _registrationTokens = <String, Object>{};
 
   /// Stable for an image registration; a retry after failure gets a new token.
@@ -56,7 +57,9 @@ class CursorManager {
   }) {
     final pending = _pendingImages[name];
     if (pending != null) return pending;
-    final registration = encodeCursorImage(
+    final deletion = _pendingDeletions[name];
+    late final Future<String> registration;
+    registration = encodeCursorImage(
             name: name,
             image: image,
             hotSpot: hotSpot,
@@ -70,6 +73,7 @@ class CursorManager {
                 throw UnsupportedError('Image cursors require a desktop OS.'),
             })
         .then((arguments) async {
+      await deletion;
       final cursorName = await _getMethodChannel()
           .invokeMethod<String>(_getMethod(createCursorKey), arguments);
       if (cursorName != name) {
@@ -79,10 +83,14 @@ class CursorManager {
       }
       return name;
     }).catchError((Object error, StackTrace stack) {
-      _registrationTokens.remove(name);
+      if (identical(_pendingImages[name], registration)) {
+        _registrationTokens.remove(name);
+      }
       Error.throwWithStackTrace(error, stack);
     }).whenComplete(() {
-      _pendingImages.remove(name);
+      if (identical(_pendingImages[name], registration)) {
+        _pendingImages.remove(name);
+      }
     });
     _registrationTokens[name] = Object();
     _pendingImages[name] = registration;
@@ -144,11 +152,26 @@ class CursorManager {
     return cursorName!;
   }
 
-  Future<void> deleteCursor(String name) async {
-    await ensureCursorRegistered(name);
-    await _getMethodChannel()
-        .invokeMethod(_getMethod(deleteCursorMethod), {"name": name});
+  Future<void> deleteCursor(String name) {
+    // Detach this generation now. A later registration must wait for deletion
+    // and create a new cursor, rather than reuse the image being deleted.
+    final registration = _pendingImages.remove(name);
+    final previousDeletion = _pendingDeletions[name];
     _registrationTokens.remove(name);
+    late final Future<void> deletion;
+    deletion = Future.wait([
+      if (registration != null) registration,
+      if (previousDeletion != null) previousDeletion,
+    ]).then<void>((_) async {
+      await _getMethodChannel()
+          .invokeMethod(_getMethod(deleteCursorMethod), {"name": name});
+    }).whenComplete(() {
+      if (identical(_pendingDeletions[name], deletion)) {
+        _pendingDeletions.remove(name);
+      }
+    });
+    _pendingDeletions[name] = deletion;
+    return deletion;
   }
 
   Future<void> setSystemCursor(String name) async {
