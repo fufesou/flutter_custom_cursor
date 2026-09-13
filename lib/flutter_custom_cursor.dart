@@ -6,17 +6,23 @@ import 'package:flutter_custom_cursor/cursor_manager.dart';
 
 class FlutterCustomMemoryImageCursor extends MouseCursor {
   final String? key;
-  const FlutterCustomMemoryImageCursor({this.key})
+  // Pass CursorManager.registrationTokenFor(key) for retryable image cursors.
+  // A failed session must differ from the session for a new registration.
+  final Object? registrationToken;
+  const FlutterCustomMemoryImageCursor({this.key, this.registrationToken})
       : assert((key != null && key != ""));
 
   // Flutter replaces cursor sessions on inequality, even for a cached bitmap.
   @override
   bool operator ==(Object other) =>
       other.runtimeType == runtimeType &&
-      other is FlutterCustomMemoryImageCursor && other.key == key;
+      other is FlutterCustomMemoryImageCursor &&
+      other.key == key &&
+      identical(other.registrationToken, registrationToken);
 
   @override
-  int get hashCode => Object.hash(runtimeType, key);
+  int get hashCode =>
+      Object.hash(runtimeType, key, identityHashCode(registrationToken));
 
   @override
   MouseCursorSession createSession(int device) =>

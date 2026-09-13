@@ -37,6 +37,10 @@ class CursorManager {
   // Encoding runs before the platform call. Channel FIFO alone cannot order
   // activation or deletion against an image whose encoding is still pending.
   final _pendingImages = <String, Future<String>>{};
+  final _registrationTokens = <String, Object>{};
+
+  /// Stable for an image registration; a retry after failure gets a new token.
+  Object? registrationTokenFor(String name) => _registrationTokens[name];
 
   /// Registers [image] at [scale] logical pixels per source pixel.
   /// [hotSpot] is in source pixels; [devicePixelRatio] is the controller view's
@@ -74,9 +78,13 @@ class CursorManager {
             message: 'The native backend did not register cursor $name.');
       }
       return name;
+    }).catchError((Object error, StackTrace stack) {
+      _registrationTokens.remove(name);
+      Error.throwWithStackTrace(error, stack);
     }).whenComplete(() {
       _pendingImages.remove(name);
     });
+    _registrationTokens[name] = Object();
     _pendingImages[name] = registration;
     return registration;
   }
@@ -140,6 +148,7 @@ class CursorManager {
     await ensureCursorRegistered(name);
     await _getMethodChannel()
         .invokeMethod(_getMethod(deleteCursorMethod), {"name": name});
+    _registrationTokens.remove(name);
   }
 
   Future<void> setSystemCursor(String name) async {

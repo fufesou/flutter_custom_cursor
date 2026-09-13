@@ -33,6 +33,12 @@ void main() {
       () => testCase.activationFailure(dispose: true));
   test('unawaited activation reports invalid image geometry',
       () => testCase.activationFailure(invalidGeometry: true));
+  for (final (failures, disposed) in [(1, false), (2, false), (1, true)]) {
+    test(
+        'same-key retry after $failures failures, disposed=$disposed',
+        () =>
+            testCase.registrationRetry(failures: failures, disposed: disposed));
+  }
 }
 
 class _RegistrationTest {
@@ -42,7 +48,7 @@ class _RegistrationTest {
   final manager = CursorManager.instance;
   final calls = <String>[];
   final createCalled = Completer<void>();
-  final nativeCreation = Completer<String>();
+  var nativeCreation = Completer<String>();
   late ui.Image image;
 
   Future<void> setUp() async {
@@ -55,7 +61,7 @@ class _RegistrationTest {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call.method.split('/').first);
       if (calls.last == 'createCustomCursor') {
-        createCalled.complete();
+        if (!createCalled.isCompleted) createCalled.complete();
         return nativeCreation.future;
       }
       return null;
@@ -123,6 +129,78 @@ class _RegistrationTest {
     nativeCreation.complete('');
     await assertion;
   }
+
+  Future<void> registrationRetry(
+      {required int failures, required bool disposed}) async {
+    const name = 'retry';
+    final mouse = MouseCursorManager(SystemMouseCursors.basic);
+    final reports = <FlutterErrorDetails>[];
+    final previousHandler = FlutterError.onError;
+    FlutterError.onError = reports.add;
+    addTearDown(() => FlutterError.onError = previousHandler);
+    for (var attempt = 0; attempt < failures; attempt++) {
+      await _failRegistration(mouse, name);
+    }
+    expect(reports, hasLength(failures));
+    expect(reports.every((report) => report.library == 'flutter_custom_cursor'),
+        isTrue);
+    final failedCursor = mouse.debugDeviceActiveCursor(1);
+    nativeCreation = Completer<String>();
+    final retry = manager.registerCursorImage(
+        name: name, image: image, hotSpot: ui.Offset.zero);
+    final retriedCursor = _cursor(name);
+    expect(retriedCursor, isNot(failedCursor));
+    final hash = retriedCursor.hashCode;
+    mouse.handleDeviceCursorUpdate(1, null, [retriedCursor]);
+    if (disposed) {
+      mouse.handleDeviceCursorUpdate(1, null, [SystemMouseCursors.basic]);
+    }
+    nativeCreation.complete(name);
+    await retry;
+    await Future<void>.delayed(Duration.zero);
+    expect(_cursor(name), retriedCursor);
+    expect(_cursor(name).hashCode, hash);
+    if (!disposed) {
+      for (var movement = 0; movement < 3; movement++) {
+        mouse.handleDeviceCursorUpdate(1, null, [_cursor(name)]);
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+    mouse.handleDeviceCursorUpdate(1, null, [SystemMouseCursors.basic]);
+    await manager.deleteCursor(name);
+    expect(manager.registrationTokenFor(name), isNull);
+    expect(reports, hasLength(failures));
+    expect(calls, [
+      for (var attempt = 0; attempt <= failures; attempt++)
+        'createCustomCursor',
+      if (!disposed) 'setCustomCursor',
+      'deleteCustomCursor',
+    ]);
+  }
+
+  Future<void> _failRegistration(MouseCursorManager mouse, String name) async {
+    nativeCreation = Completer<String>();
+    final failed = manager.registerCursorImage(
+        name: name, image: image, hotSpot: ui.Offset.zero);
+    final failure = expectLater(failed, throwsA(isA<PlatformException>()));
+    final cursor = _cursor(name);
+    mouse.handleDeviceCursorUpdate(1, null, [cursor]);
+    expect(
+        manager.registerCursorImage(
+            name: name, image: image, hotSpot: ui.Offset.zero),
+        same(failed));
+    expect(_cursor(name), cursor);
+    await createCalled.future;
+    nativeCreation.complete('');
+    await failure;
+    await Future<void>.delayed(Duration.zero);
+    expect(manager.registrationTokenFor(name), isNull);
+    expect(calls, isNot(contains('setCustomCursor')));
+  }
+
+  FlutterCustomMemoryImageCursor _cursor(String name) =>
+      FlutterCustomMemoryImageCursor(
+          key: name, registrationToken: manager.registrationTokenFor(name));
 
   Future<void> activationFailure(
       {bool dispose = false, bool invalidGeometry = false}) async {
