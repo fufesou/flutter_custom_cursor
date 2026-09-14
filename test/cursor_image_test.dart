@@ -30,10 +30,71 @@ void main() {
       test('$platform DPR $dpr keeps thin cursor axes and hotspots valid',
           () => _checkThinCursor(platform, dpr));
     }
+    for (final dpr in [1.0, 2.0]) {
+      test('$platform DPR $dpr preserves sparse strokes when downscaling',
+          () => _checkSparseCursor(platform, dpr));
+    }
   }
   test('rejects invalid scales and source hotspots', _rejectInvalidGeometry);
   test('owns an image handle while asynchronous encoding is in progress',
       _retainImage);
+}
+
+Future<void> _checkSparseCursor(TargetPlatform platform, double dpr) async {
+  const side = 64;
+  const hotspot = ui.Offset(32, 32);
+  for (final vertical in [true, false]) {
+    for (final position in [31.0, 32.0, 33.0]) {
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawRect(
+          vertical
+              ? ui.Rect.fromLTWH(position, 0, 1, side.toDouble())
+              : ui.Rect.fromLTWH(0, position, side.toDouble(), 1),
+          ui.Paint()..color = const ui.Color(0xffffffff));
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(side, side);
+      picture.dispose();
+      addTearDown(image.dispose);
+      for (final scale in [0.25, 0.5, 1.0, 2.0]) {
+        final args = await encodeCursorImage(
+            name: 'sparse',
+            image: image,
+            hotSpot: hotspot,
+            scale: scale,
+            devicePixelRatio: dpr,
+            platform: platform);
+        final size = (side * scale * dpr).round();
+        expect((args['width'], args['height']), (size, size));
+        expect((args['hotX'], args['hotY']),
+            (hotspot.dx * scale * dpr, hotspot.dy * scale * dpr));
+        await _checkCoverage(args, platform,
+            reason:
+                'vertical=$vertical position=$position scale=$scale DPR=$dpr');
+      }
+    }
+  }
+}
+
+Future<void> _checkCoverage(Map<String, dynamic> args, TargetPlatform platform,
+    {required String reason}) async {
+  var bytes = args['buffer'] as Uint8List;
+  if (platform != TargetPlatform.windows) {
+    final codec = await ui.instantiateImageCodec(bytes);
+    final image = (await codec.getNextFrame()).image;
+    codec.dispose();
+    try {
+      bytes = (await image.toByteData())!.buffer.asUint8List();
+    } finally {
+      image.dispose();
+    }
+  }
+  final alpha = [for (var i = 3; i < bytes.length; i += 4) bytes[i]];
+  expect(alpha.any((value) => value > 0), isTrue, reason: reason);
+  // A one-pixel stroke covers 1/64 of the square at every output resolution.
+  final coverage = alpha.fold<int>(0, (sum, value) => sum + value);
+  expect(coverage, closeTo(alpha.length * 255 / 64, args['height'] as int),
+      reason: reason);
 }
 
 Future<void> _checkThinCursor(TargetPlatform platform, double dpr) async {

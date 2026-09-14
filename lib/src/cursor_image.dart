@@ -106,7 +106,11 @@ Future<ui.Image> _rasterize(
       image,
       ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
       ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-      ui.Paint()..filterQuality = ui.FilterQuality.low);
+      // Bilinear minification can miss thin strokes between sample locations.
+      ui.Paint()
+        ..filterQuality = width < image.width || height < image.height
+            ? ui.FilterQuality.medium
+            : ui.FilterQuality.low);
   final picture = recorder.endRecording();
   try {
     return await picture.toImage(bufferWidth, height);
